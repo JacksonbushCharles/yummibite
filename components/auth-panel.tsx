@@ -1,90 +1,126 @@
 "use client";
 
-import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { type FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 
-export function AuthPanel() {
-  const [email, setEmail] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  const isGoogleConfigured = Boolean(
-    process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID,
-  );
+export function AuthPanel({
+  redirectTo,
+  googleEnabled,
+}: {
+  redirectTo: "/account" | "/admin";
+  googleEnabled: boolean;
+}) {
+  const router = useRouter();
+  const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleMagicLink = async () => {
-    if (!email.trim()) return;
-    setIsSending(true);
+  async function signInWithGoogle() {
+    setPending(true);
+    setError("");
     try {
-      await authClient.signIn.magicLink({
-        email,
-        name: "Client",
-        callbackURL: "/dashboard",
-      });
-      alert("Magic link sent. Check your inbox to continue.");
-    } catch (error) {
-      console.error(error);
-      alert("Could not send the magic link. Set up your email provider env vars.");
-    } finally {
-      setIsSending(false);
-    }
-  };
-
-  const handleGoogleSignIn = async () => {
-    if (!isGoogleConfigured) {
-      alert("Google OAuth is not configured yet.");
-      return;
-    }
-
-    setIsGoogleLoading(true);
-    try {
-      await authClient.signIn.social({
+      const result = await authClient.signIn.social({
         provider: "google",
-        callbackURL: "/dashboard",
+        callbackURL: redirectTo,
       });
-    } catch (error) {
-      console.error(error);
-      alert("Google sign-in could not be started.");
+      if (result.error) {
+        setError("Google sign-in could not be started. Please try again.");
+      }
+    } catch (signInError) {
+      console.error("Could not start Google sign-in:", signInError);
+      setError("Google sign-in could not be completed. Please try again.");
     } finally {
-      setIsGoogleLoading(false);
+      setPending(false);
     }
-  };
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setError("");
+    const form = new FormData(event.currentTarget);
+    try {
+      const email = String(form.get("email")).trim();
+      const password = String(form.get("password"));
+      const result = mode === "sign-in"
+        ? await authClient.signIn.email({ email, password, callbackURL: redirectTo })
+        : await authClient.signUp.email({
+            name: String(form.get("name")).trim(),
+            email,
+            password,
+            callbackURL: redirectTo,
+          });
+      if (result.error) {
+        setError(
+          mode === "sign-in"
+            ? "Sign in failed. Check your email and password, then try again."
+            : "Your account could not be created. Check your details or try signing in.",
+        );
+        return;
+      }
+      router.replace(redirectTo);
+      router.refresh();
+    } catch (signInError) {
+      console.error("Could not sign in:", signInError);
+      setError("Sign in could not be completed. Please try again.");
+    } finally {
+      setPending(false);
+    }
+  }
 
   return (
-    <div className="space-y-4">
-      {isGoogleConfigured ? (
-        <button
-          type="button"
-          onClick={handleGoogleSignIn}
-          disabled={isGoogleLoading}
-          className="flex w-full items-center justify-center gap-2 rounded-full border border-border bg-background/80 px-4 py-3 text-[0.62rem] uppercase tracking-[0.22em] text-foreground/80 transition hover:border-foreground/20 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {isGoogleLoading ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Connecting</> : "Continue with Google"}
-        </button>
-      ) : null}
-
-      <div className="space-y-3 rounded-[1.5rem] border border-border bg-background/60 p-4">
-        <label htmlFor="email" className="text-[0.6rem] uppercase tracking-[0.22em] text-foreground/55">
-          Continue with email
+    <div className="space-y-5">
+      {googleEnabled && (
+        <>
+          <button
+            type="button"
+            onClick={() => void signInWithGoogle()}
+            disabled={pending}
+            className="w-full rounded-full border border-border px-6 py-4 text-sm font-semibold transition hover:border-accent hover:text-accent disabled:opacity-50"
+          >
+            {pending ? "Connecting to Google…" : "Continue with Google"}
+          </button>
+          <div className="flex items-center gap-4 text-xs text-foreground/50">
+            <span className="h-px flex-1 bg-border" />
+            <span>or use email</span>
+            <span className="h-px flex-1 bg-border" />
+          </div>
+        </>
+      )}
+      <form onSubmit={submit} className="space-y-5">
+        {mode === "sign-up" && (
+          <label className="block text-sm">
+            Your name
+            <input name="name" type="text" autoComplete="name" minLength={2} maxLength={100} required className="form-input mt-2" />
+          </label>
+        )}
+        <label className="block text-sm">
+          Email
+          <input name="email" type="email" autoComplete="username" required className="form-input mt-2" />
         </label>
-        <input
-          id="email"
-          type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="you@company.com"
-          className="w-full rounded-full border border-border bg-background px-4 py-3 text-sm text-foreground outline-none ring-0 placeholder:text-foreground/35 focus:border-foreground/20"
-        />
-        <button
-          type="button"
-          onClick={handleMagicLink}
-          disabled={isSending || !email.trim()}
-          className="flex w-full items-center justify-center gap-2 rounded-full bg-foreground px-4 py-3 text-[0.62rem] uppercase tracking-[0.22em] text-background transition disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {isSending ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending</> : "Continue with email"}
+        <label className="block text-sm">
+          Password
+          <input name="password" type="password" autoComplete={mode === "sign-in" ? "current-password" : "new-password"} minLength={8} required className="form-input mt-2" />
+        </label>
+        {error && <p role="alert" className="text-sm text-red-800">{error}</p>}
+        <button disabled={pending} className="w-full rounded-full bg-accent px-6 py-4 text-sm font-semibold text-white disabled:opacity-50">
+          {pending ? (mode === "sign-in" ? "Signing in…" : "Creating account…") : (mode === "sign-in" ? "Sign in" : "Create account")}
         </button>
-      </div>
+        <p className="text-center text-sm text-foreground/65">
+          {mode === "sign-in" ? "New to Yummibite?" : "Already have an account?"}{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setMode(mode === "sign-in" ? "sign-up" : "sign-in");
+              setError("");
+            }}
+            className="font-semibold text-accent underline underline-offset-4"
+          >
+            {mode === "sign-in" ? "Create an account" : "Sign in"}
+          </button>
+        </p>
+      </form>
     </div>
   );
 }
-

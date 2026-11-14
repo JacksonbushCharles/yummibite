@@ -1,26 +1,32 @@
-import { CtaButton } from "@/components/cta-button";
 import { AuthPanel } from "@/components/auth-panel";
+import type { Metadata } from "next";
 
-export default function SignInPage() {
+export const metadata: Metadata = {
+  title: "Your account",
+  robots: { index: false, follow: false },
+};
+
+export default async function SignInPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const { next } = await searchParams;
+  const redirectTo = next === "/admin" ? "/admin" : "/account";
+
   return (
-    <main className="mx-auto flex max-w-5xl items-center justify-center px-4 py-20 sm:px-6 lg:px-8">
-      <div className="w-full max-w-xl rounded-[2rem] border border-border bg-card/70 p-6 shadow-[0_30px_80px_rgba(0,0,0,0.08)] sm:p-8">
-        <div className="text-[0.62rem] uppercase tracking-[0.28em] text-foreground/55">Access</div>
-        <h1 className="mt-6 text-4xl tracking-[-0.06em] text-foreground sm:text-5xl">Welcome back.</h1>
-        <p className="mt-4 text-base leading-7 text-foreground/70">
-          Continue with your Google account or use a secure magic link to reach your dashboard.
+    <main className="mx-auto flex max-w-7xl items-center justify-center px-5 py-16 sm:px-8 lg:py-24">
+      <div className="w-full max-w-lg rounded-3xl border border-border bg-card p-7 sm:p-10">
+        <div className="eyebrow text-accent">Yummibite / Your account</div>
+        <h1 className="mt-5 font-serif text-4xl">Welcome to Yummibite</h1>
+        <p className="mt-4 text-sm leading-6 text-foreground/65">
+          Sign in or create an account with your name and email.
         </p>
-
         <div className="mt-8">
-          <AuthPanel />
-        </div>
-
-        <div className="mt-8 rounded-[1.5rem] border border-border bg-background/60 p-4 text-sm leading-7 text-foreground/70">
-          In development mode, the form is live and the magic link request goes through the Better Auth handler. Add your real OAuth and email env vars to enable production sign-in.
-        </div>
-
-        <div className="mt-8">
-          <CtaButton href="/dashboard">Go to dashboard</CtaButton>
+          <AuthPanel
+            redirectTo={redirectTo}
+            googleEnabled={Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)}
+          />
         </div>
       </div>
     </main>

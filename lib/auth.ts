@@ -1,53 +1,37 @@
-import fs from "node:fs";
-import path from "node:path";
-import Database from "better-sqlite3";
 import { betterAuth } from "better-auth";
-import { magicLink } from "better-auth/plugins";
 import { Kysely, SqliteDialect } from "kysely";
+import { getDatabase } from "@/lib/db";
 
-const sqlitePath = process.env.BETTER_AUTH_SQLITE_PATH || "./data/auth.db";
-const sqliteDir = path.dirname(sqlitePath);
+const secret = process.env.BETTER_AUTH_SECRET;
 
-if (!fs.existsSync(sqliteDir)) {
-  fs.mkdirSync(sqliteDir, { recursive: true });
+if (process.env.NODE_ENV === "production" && !secret) {
+  throw new Error("BETTER_AUTH_SECRET must be set in production.");
 }
 
-const sqliteDatabase = new Database(sqlitePath);
-
-export const db = new Kysely<any>({
-  dialect: new SqliteDialect({
-    database: sqliteDatabase,
+const authDatabase = {
+  db: new Kysely<Record<string, never>>({
+    dialect: new SqliteDialect({ database: getDatabase() }),
   }),
-});
+  type: "sqlite" as const,
+};
 
-const isGoogleConfigured = Boolean(
-  process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET,
-);
+const googleCredentials = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+  ? {
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      redirectURI: `${process.env.BETTER_AUTH_URL || "http://localhost:3000"}/api/auth/callback/google`,
+    }
+  : undefined;
 
 export const auth = betterAuth({
-  database: db,
-  secret: process.env.BETTER_AUTH_SECRET || "dev-secret-change-me",
+  database: authDatabase,
+  secret: secret || "local-development-only-secret-change-before-deploy",
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
+  socialProviders: {
+    google: googleCredentials,
+  },
   emailAndPassword: {
     enabled: true,
-    autoSignIn: true,
     requireEmailVerification: false,
   },
-  socialProviders: {
-    google: isGoogleConfigured
-      ? {
-          clientId: process.env.GOOGLE_CLIENT_ID!,
-          clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-          redirectURI: `${process.env.BETTER_AUTH_URL || "http://localhost:3000"}/api/auth/callback/google`,
-        }
-      : undefined,
-  },
-  plugins: [
-    magicLink({
-      sendMagicLink: async ({ email, url }) => {
-        console.log("Magic link for", email, url);
-        // Replace this with a real SMTP/email provider integration later.
-      },
-    }),
-  ],
 });
