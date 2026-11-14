@@ -23,15 +23,12 @@ export async function PATCH(
     return NextResponse.json({ error: "Choose a valid reservation status." }, { status: 400 });
   }
 
-  const result = getDatabase().prepare(
-    `UPDATE reservations SET status = ?, updated_at = ?
-     WHERE id = ?`,
-  ).run(
-    parsed.data.status,
-    new Date().toISOString(),
-    id,
+  const result = await getDatabase().query(
+    `UPDATE reservations SET status = $1, updated_at = now()::text
+     WHERE id = $2`,
+    [parsed.data.status, id],
   );
-  if (!result.changes) {
+  if (!result.rowCount) {
     return NextResponse.json({ error: "Reservation not found." }, { status: 404 });
   }
   return NextResponse.json({ ok: true });

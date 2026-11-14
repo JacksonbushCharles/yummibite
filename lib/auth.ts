@@ -1,5 +1,5 @@
 import { betterAuth } from "better-auth";
-import { Kysely, SqliteDialect } from "kysely";
+import { Kysely, PostgresDialect } from "kysely";
 import { getDatabase } from "@/lib/db";
 
 const secret = process.env.BETTER_AUTH_SECRET;
@@ -10,9 +10,9 @@ if (process.env.NODE_ENV === "production" && !secret) {
 
 const authDatabase = {
   db: new Kysely<Record<string, never>>({
-    dialect: new SqliteDialect({ database: getDatabase() }),
+    dialect: new PostgresDialect({ pool: getDatabase() }),
   }),
-  type: "sqlite" as const,
+  type: "postgres" as const,
 };
 
 const googleCredentials = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET

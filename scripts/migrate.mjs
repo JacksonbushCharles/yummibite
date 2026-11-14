@@ -1,29 +1,32 @@
 import { readFile } from "node:fs/promises";
-import { mkdirSync } from "node:fs";
-import { basename, join } from "node:path";
 import env from "@next/env";
-import Database from "better-sqlite3";
+import pg from "pg";
 
 const { loadEnvConfig } = env;
 loadEnvConfig(process.cwd());
+
+const { Pool } = pg;
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error("Set DATABASE_URL to the PostgreSQL connection string before migrating.");
+}
 
 const migration = await readFile(
   new URL("../drizzle/0000_restaurant_foundation.sql", import.meta.url),
   "utf8",
 );
-const databaseFile = process.env.SQLITE_DATABASE_FILE?.trim() || "auth.db";
-if (basename(databaseFile) !== databaseFile) {
-  throw new Error("SQLITE_DATABASE_FILE must be a file name inside the data directory.");
-}
-const dataDirectory = join(process.cwd(), "data");
-const databasePath = join(dataDirectory, databaseFile);
-mkdirSync(dataDirectory, { recursive: true });
-const database = new Database(databasePath);
+const database = new Pool({ connectionString, max: 1 });
+const client = await database.connect();
 
 try {
-  database.pragma("foreign_keys = ON");
-  database.exec(migration);
-  console.log(`Yummibite SQLite migration completed: ${databasePath}`);
+  await client.query("BEGIN");
+  await client.query(migration);
+  await client.query("COMMIT");
+  console.log("Yummibite PostgreSQL migration completed.");
+} catch (error) {
+  await client.query("ROLLBACK");
+  throw error;
 } finally {
-  database.close();
+  client.release();
+  await database.end();
 }

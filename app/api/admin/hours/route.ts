@@ -30,30 +30,32 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Check opening hours and try again." }, { status: 400 });
   }
 
-  const database = getDatabase();
-  const saveHours = database.transaction((hours: typeof parsed.data.hours) => {
-    const upsert = database.prepare(
-      `INSERT INTO restaurant_hours (day_of_week, open_time, close_time, is_closed)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT (day_of_week) DO UPDATE SET
-         open_time = excluded.open_time,
-         close_time = excluded.close_time,
-         is_closed = excluded.is_closed`,
-    );
-    for (const day of hours) {
-      upsert.run(
-        day.dayOfWeek,
-        day.isClosed ? null : day.openTime,
-        day.isClosed ? null : day.closeTime,
-        Number(day.isClosed),
+  const client = await getDatabase().connect();
+  try {
+    await client.query("BEGIN");
+    for (const day of parsed.data.hours) {
+      await client.query(
+        `INSERT INTO restaurant_hours (day_of_week, open_time, close_time, is_closed)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (day_of_week) DO UPDATE SET
+           open_time = EXCLUDED.open_time,
+           close_time = EXCLUDED.close_time,
+           is_closed = EXCLUDED.is_closed`,
+        [
+          day.dayOfWeek,
+          day.isClosed ? null : day.openTime,
+          day.isClosed ? null : day.closeTime,
+          day.isClosed,
+        ],
       );
     }
-  });
-  try {
-    saveHours(parsed.data.hours);
+    await client.query("COMMIT");
     return NextResponse.json({ ok: true });
   } catch (error) {
+    await client.query("ROLLBACK");
     console.error("Could not save restaurant opening hours:", error);
     return NextResponse.json({ error: "Could not save opening hours." }, { status: 503 });
+  } finally {
+    client.release();
   }
 }

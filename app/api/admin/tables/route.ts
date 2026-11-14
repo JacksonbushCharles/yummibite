@@ -21,10 +21,11 @@ export async function POST(request: Request) {
 
   try {
     const id = randomUUID();
-    getDatabase().prepare(
+    await getDatabase().query(
       `INSERT INTO restaurant_tables (id, name, capacity, section)
-       VALUES (?, ?, ?, ?)`,
-    ).run(id, parsed.data.name, parsed.data.capacity, parsed.data.section || null);
+       VALUES ($1, $2, $3, $4)`,
+      [id, parsed.data.name, parsed.data.capacity, parsed.data.section || null],
+    );
     return NextResponse.json({ id }, { status: 201 });
   } catch (error) {
     console.error("Could not save restaurant table:", error);

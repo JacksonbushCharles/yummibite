@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Pool, PoolClient } from "pg";
 import { restaurantConfig } from "@/lib/restaurant-config";
 import { getDatabase } from "@/lib/db";
 
@@ -81,11 +81,11 @@ function findTableCombination(tables: RestaurantTable[], partySize: number) {
   return best?.[1];
 }
 
-function getDateAvailability(
-  database: Database.Database,
+async function getDateAvailability(
+  database: Pool | PoolClient,
   date: string,
   partySize: number,
-) {
+): Promise<{ slots: string[]; tables: RestaurantTable[] }> {
   const day = assertDate(date);
   const timeZone = process.env.RESTAURANT_TIME_ZONE || "UTC";
   const todayParts = Object.fromEntries(
@@ -110,38 +110,46 @@ function getDateAvailability(
   }
 
   const dayOfWeek = day.getUTCDay();
-  const hours = database.prepare(
+  const hoursResult = await database.query<{
+    open_time: string | null;
+    close_time: string | null;
+    is_closed: boolean;
+  }>(
     `SELECT open_time, close_time, is_closed
-     FROM restaurant_hours WHERE day_of_week = ?`,
-  ).get(dayOfWeek) as
-    | { open_time: string | null; close_time: string | null; is_closed: number }
-    | undefined;
+     FROM restaurant_hours WHERE day_of_week = $1`,
+    [dayOfWeek],
+  );
+  const hours = hoursResult.rows[0];
   if (!hours || hours.is_closed || !hours.open_time || !hours.close_time) {
     return { slots: [], tables: [] as RestaurantTable[] };
   }
 
-  const tables = database.prepare(
+  const tablesResult = await database.query<RestaurantTable>(
     `SELECT id, capacity FROM restaurant_tables
-     WHERE is_active = 1 ORDER BY capacity`,
-  ).all() as RestaurantTable[];
+     WHERE is_active = true ORDER BY capacity`,
+  );
+  const tables = tablesResult.rows;
   if (tables.length === 0) return { slots: [], tables };
 
   const nextDate = new Date(day.getTime() + 86_400_000).toISOString().slice(0, 10);
   const dayStart = toRestaurantTime(date, "00:00");
   const dayEnd = toRestaurantTime(nextDate, "00:00");
-  const existing = database.prepare(
-    `SELECT r.starts_at AS startsAt, r.duration_minutes AS durationMinutes,
-            rt.table_id AS tableId
+  const existingResult = await database.query<ExistingReservation>(
+    `SELECT r.starts_at AS "startsAt", r.duration_minutes AS "durationMinutes",
+            rt.table_id AS "tableId"
      FROM reservations r
      JOIN reservation_tables rt ON rt.reservation_id = r.id
-     WHERE r.starts_at < ?
-       AND julianday(r.starts_at) + ((r.duration_minutes + ?) / 1440.0) >= julianday(?)
+     WHERE r.starts_at::timestamptz < $1::timestamptz
+       AND r.starts_at::timestamptz +
+           ((r.duration_minutes + $2) * interval '1 minute') >= $3::timestamptz
        AND r.status IN ('pending', 'confirmed', 'seated')`,
-  ).all(
-    dayEnd.toISOString(),
-    restaurantConfig.reservation.bufferMinutes,
-    dayStart.toISOString(),
-  ) as ExistingReservation[];
+    [
+      dayEnd.toISOString(),
+      restaurantConfig.reservation.bufferMinutes,
+      dayStart.toISOString(),
+    ],
+  );
+  const existing = existingResult.rows;
 
   const toMinutes = (value: string) => {
     const [hour, minute] = value.split(":").map(Number);
@@ -184,7 +192,7 @@ function getDateAvailability(
 }
 
 export async function getAvailableReservationSlots(date: string, partySize: number) {
-  return getDateAvailability(getDatabase(), date, partySize).slots;
+  return (await getDateAvailability(getDatabase(), date, partySize)).slots;
 }
 
 export async function createReservation(input: {
@@ -199,58 +207,80 @@ export async function createReservation(input: {
 }) {
   assertDate(input.date);
   const database = getDatabase();
-  const create = database.transaction(() => {
-    const { slots, tables } = getDateAvailability(database, input.date, input.partySize);
-    if (!slots.includes(input.time)) return null;
+  const client = await database.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [input.date],
+    );
+    const { slots, tables } = await getDateAvailability(client, input.date, input.partySize);
+    if (!slots.includes(input.time)) {
+      await client.query("ROLLBACK");
+      return null;
+    }
 
     const startsAt = toRestaurantTime(input.date, input.time);
     const slotEnd = startsAt.getTime() +
       (restaurantConfig.reservation.durationMinutes + restaurantConfig.reservation.bufferMinutes) * 60_000;
-    const occupiedRows = database.prepare(
-      `SELECT rt.table_id AS tableId
+    const occupiedResult = await client.query<{ tableId: string }>(
+      `SELECT rt.table_id AS "tableId"
        FROM reservations r
        JOIN reservation_tables rt ON rt.reservation_id = r.id
-       WHERE r.starts_at < ?
-         AND julianday(r.starts_at) + ((r.duration_minutes + ?) / 1440.0) > julianday(?)
+       WHERE r.starts_at::timestamptz < $1::timestamptz
+         AND r.starts_at::timestamptz +
+             ((r.duration_minutes + $2) * interval '1 minute') > $3::timestamptz
          AND r.status IN ('pending', 'confirmed', 'seated')`,
-    ).all(
-      new Date(slotEnd).toISOString(),
-      restaurantConfig.reservation.bufferMinutes,
-      startsAt.toISOString(),
-    ) as Array<{ tableId: string }>;
-    const occupied = new Set(occupiedRows.map(({ tableId }) => tableId));
+      [
+        new Date(slotEnd).toISOString(),
+        restaurantConfig.reservation.bufferMinutes,
+        startsAt.toISOString(),
+      ],
+    );
+    const occupied = new Set(occupiedResult.rows.map(({ tableId }) => tableId));
     const allocation = findTableCombination(
       tables.filter((table) => !occupied.has(table.id)),
       input.partySize,
     );
-    if (!allocation) return null;
+    if (!allocation) {
+      await client.query("ROLLBACK");
+      return null;
+    }
 
     const reference = randomBytes(8).toString("hex").toUpperCase();
     const reservationId = randomUUID();
-    database.prepare(
+    await client.query(
       `INSERT INTO reservations
          (id, reference, full_name, phone, email, starts_at, party_size, duration_minutes,
           special_requests, occasion, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-    ).run(
-      reservationId,
-      reference,
-      input.fullName,
-      input.phone,
-      input.email,
-      startsAt.toISOString(),
-      input.partySize,
-      restaurantConfig.reservation.durationMinutes,
-      input.specialRequests || null,
-      input.occasion || null,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')`,
+      [
+        reservationId,
+        reference,
+        input.fullName,
+        input.phone,
+        input.email,
+        startsAt.toISOString(),
+        input.partySize,
+        restaurantConfig.reservation.durationMinutes,
+        input.specialRequests || null,
+        input.occasion || null,
+      ],
     );
 
-    const assignTable = database.prepare(
-      `INSERT INTO reservation_tables (reservation_id, table_id) VALUES (?, ?)`,
-    );
-    for (const table of allocation) assignTable.run(reservationId, table.id);
+    for (const table of allocation) {
+      await client.query(
+        `INSERT INTO reservation_tables (reservation_id, table_id) VALUES ($1, $2)`,
+        [reservationId, table.id],
+      );
+    }
 
+    await client.query("COMMIT");
     return { reference, startsAt };
-  });
-  return create.immediate();
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }

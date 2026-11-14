@@ -1,42 +1,43 @@
 import { randomUUID } from "node:crypto";
 import {
+  boolean,
   check,
   integer,
+  pgTable,
   primaryKey,
-  sqliteTable,
   text,
-} from "drizzle-orm/sqlite-core";
+} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-export const restaurantHours = sqliteTable(
+export const restaurantHours = pgTable(
   "restaurant_hours",
   {
     dayOfWeek: integer("day_of_week").primaryKey(),
     openTime: text("open_time"),
     closeTime: text("close_time"),
-    isClosed: integer("is_closed", { mode: "boolean" }).notNull().default(true),
+    isClosed: boolean("is_closed").notNull().default(true),
   },
   (table) => [
     check("restaurant_hours_day_check", sql`${table.dayOfWeek} between 0 and 6`),
   ],
 );
 
-export const restaurantTables = sqliteTable(
+export const restaurantTables = pgTable(
   "restaurant_tables",
   {
     id: text("id").$defaultFn(randomUUID).primaryKey(),
     name: text("name").notNull().unique(),
     capacity: integer("capacity").notNull(),
     section: text("section"),
-    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
-    createdAt: text("created_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: text("created_at").notNull().default(sql`now()::text`),
   },
   (table) => [
     check("restaurant_tables_capacity_check", sql`${table.capacity} > 0`),
   ],
 );
 
-export const reservations = sqliteTable(
+export const reservations = pgTable(
   "reservations",
   {
     id: text("id").$defaultFn(randomUUID).primaryKey(),
@@ -50,8 +51,8 @@ export const reservations = sqliteTable(
     specialRequests: text("special_requests"),
     occasion: text("occasion"),
     status: text("status").notNull().default("pending"),
-    createdAt: text("created_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
-    updatedAt: text("updated_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+    createdAt: text("created_at").notNull().default(sql`now()::text`),
+    updatedAt: text("updated_at").notNull().default(sql`now()::text`),
   },
   (table) => [
     check("reservations_party_size_check", sql`${table.partySize} > 0`),
@@ -63,7 +64,7 @@ export const reservations = sqliteTable(
   ],
 );
 
-export const reservationTables = sqliteTable(
+export const reservationTables = pgTable(
   "reservation_tables",
   {
     reservationId: text("reservation_id")
@@ -78,14 +79,14 @@ export const reservationTables = sqliteTable(
   ],
 );
 
-export const menuCategories = sqliteTable("menu_categories", {
+export const menuCategories = pgTable("menu_categories", {
   id: text("id").$defaultFn(randomUUID).primaryKey(),
   name: text("name").notNull(),
   sortOrder: integer("sort_order").notNull().default(0),
-  isVisible: integer("is_visible", { mode: "boolean" }).notNull().default(true),
+  isVisible: boolean("is_visible").notNull().default(true),
 });
 
-export const menuItems = sqliteTable(
+export const menuItems = pgTable(
   "menu_items",
   {
     id: text("id").$defaultFn(randomUUID).primaryKey(),
@@ -97,7 +98,7 @@ export const menuItems = sqliteTable(
     priceMinor: integer("price_minor").notNull(),
     currency: text("currency").notNull().default("USD"),
     imageUrl: text("image_url"),
-    isAvailable: integer("is_available", { mode: "boolean" }).notNull().default(true),
+    isAvailable: boolean("is_available").notNull().default(true),
     sortOrder: integer("sort_order").notNull().default(0),
   },
   (table) => [
@@ -105,13 +106,13 @@ export const menuItems = sqliteTable(
   ],
 );
 
-export const restaurantSettings = sqliteTable("restaurant_settings", {
+export const restaurantSettings = pgTable("restaurant_settings", {
   key: text("key").primaryKey(),
-  value: text("value", { mode: "json" }).notNull(),
-  updatedAt: text("updated_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+  value: text("value").notNull(),
+  updatedAt: text("updated_at").notNull().default(sql`now()::text`),
 });
 
-export const reservationRateLimits = sqliteTable(
+export const reservationRateLimits = pgTable(
   "reservation_rate_limits",
   {
     key: text("key").primaryKey(),

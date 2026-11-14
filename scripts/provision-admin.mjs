@@ -1,15 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { basename, join } from "node:path";
-import Database from "better-sqlite3";
 import { hashPassword } from "better-auth/crypto";
 import env from "@next/env";
+import pg from "pg";
 
 const { loadEnvConfig } = env;
 loadEnvConfig(process.cwd());
 
 const {
-  SQLITE_DATABASE_FILE,
+  DATABASE_URL,
   ADMIN_EMAIL,
   ADMIN_PASSWORD,
   ADMIN_NAME,
@@ -23,68 +21,73 @@ if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !ADMIN_NAME) {
 if (ADMIN_PASSWORD.length < 12) {
   throw new Error("ADMIN_PASSWORD must be at least 12 characters.");
 }
+if (!DATABASE_URL) {
+  throw new Error("Set DATABASE_URL to the PostgreSQL connection string before provisioning.");
+}
 
 const email = ADMIN_EMAIL.trim().toLowerCase();
 if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
   throw new Error("ADMIN_EMAIL must be a valid email address.");
 }
 
-const databaseFile = SQLITE_DATABASE_FILE?.trim() || "auth.db";
-if (basename(databaseFile) !== databaseFile) {
-  throw new Error("SQLITE_DATABASE_FILE must be a file name inside the data directory.");
-}
-const dataDirectory = join(process.cwd(), "data");
-const databasePath = join(dataDirectory, databaseFile);
-mkdirSync(dataDirectory, { recursive: true });
-const database = new Database(databasePath);
-database.pragma("foreign_keys = ON");
+const { Pool } = pg;
+const database = new Pool({ connectionString: DATABASE_URL, max: 1 });
+const client = await database.connect();
 
 try {
-  const existingUser = database.prepare(
-    `SELECT id FROM "user" WHERE lower(email) = ?`,
-  ).get(email);
-  const userId = existingUser?.id || randomUUID();
-  const now = Date.now();
+  const existingUser = await client.query(
+    `SELECT id FROM "user" WHERE lower(email) = $1`,
+    [email],
+  );
+  const userId = existingUser.rows[0]?.id || randomUUID();
   const passwordHash = await hashPassword(ADMIN_PASSWORD);
-  database.transaction(() => {
-    if (existingUser) {
-      database.prepare(
-        `UPDATE "user" SET name = ?, "emailVerified" = 1, "updatedAt" = ?
-         WHERE id = ?`,
-      ).run(ADMIN_NAME.trim(), now, userId);
-    } else {
-      database.prepare(
-        `INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt")
-         VALUES (?, ?, ?, 1, ?, ?)`,
-      ).run(userId, ADMIN_NAME.trim(), email, now, now);
-    }
+  await client.query("BEGIN");
+  if (existingUser.rows[0]) {
+    await client.query(
+      `UPDATE "user" SET name = $1, "emailVerified" = true, "updatedAt" = now()
+       WHERE id = $2`,
+      [ADMIN_NAME.trim(), userId],
+    );
+  } else {
+    await client.query(
+      `INSERT INTO "user" (id, name, email, "emailVerified")
+       VALUES ($1, $2, $3, true)`,
+      [userId, ADMIN_NAME.trim(), email],
+    );
+  }
 
-    const credentialAccount = database.prepare(
-      `SELECT id FROM "account"
-       WHERE "userId" = ? AND "providerId" = 'credential'
-       ORDER BY CASE WHEN "accountId" = ? THEN 0 ELSE 1 END
-       LIMIT 1`,
-    ).get(userId, userId);
-    if (credentialAccount) {
-      database.prepare(
-        `UPDATE "account"
-         SET "accountId" = ?, password = ?, "updatedAt" = ?
-         WHERE id = ?`,
-      ).run(userId, passwordHash, now, credentialAccount.id);
-    } else {
-      database.prepare(
-        `INSERT INTO "account"
-           (id, "accountId", "providerId", "userId", password, "createdAt", "updatedAt")
-         VALUES (?, ?, 'credential', ?, ?, ?, ?)`,
-      ).run(randomUUID(), userId, userId, passwordHash, now, now);
-    }
-
-    database.prepare(`DELETE FROM "session" WHERE "userId" = ?`).run(userId);
-  }).immediate();
+  const credentialAccount = await client.query(
+    `SELECT id FROM "account"
+     WHERE "userId" = $1 AND "providerId" = 'credential'
+     ORDER BY CASE WHEN "accountId" = $1 THEN 0 ELSE 1 END
+     LIMIT 1`,
+    [userId],
+  );
+  if (credentialAccount.rows[0]) {
+    await client.query(
+      `UPDATE "account"
+       SET "accountId" = $1, password = $2, "updatedAt" = now()
+       WHERE id = $3`,
+      [userId, passwordHash, credentialAccount.rows[0].id],
+    );
+  } else {
+    await client.query(
+      `INSERT INTO "account"
+         (id, "accountId", "providerId", "userId", password)
+       VALUES ($1, $2, 'credential', $3, $4)`,
+      [randomUUID(), userId, userId, passwordHash],
+    );
+  }
+  await client.query(`DELETE FROM "session" WHERE "userId" = $1`, [userId]);
+  await client.query("COMMIT");
 
   console.log(
-    `${existingUser ? "Reset" : "Provisioned"} the Yummibite admin account for ${email} in ${databasePath}.`,
+    `${existingUser.rows[0] ? "Reset" : "Provisioned"} the Yummibite admin account for ${email}.`,
   );
+} catch (error) {
+  await client.query("ROLLBACK");
+  throw error;
 } finally {
-  database.close();
+  client.release();
+  await database.end();
 }

@@ -1,7 +1,7 @@
 # Yummibite
 
 A single-restaurant website and reservation app built with Next.js, TypeScript,
-SQLite, Drizzle ORM and Better Auth.
+PostgreSQL, Drizzle ORM and Better Auth.
 
 Restaurant facts, hours, dishes, prices, address, phone number and email must be
 confirmed by the restaurant. Until then, the site labels sample photography
@@ -9,15 +9,15 @@ and placeholders rather than presenting invented details as fact.
 
 ## Local setup
 
-1. Install Node.js 20+.
-2. Copy `.env.example` to `.env.local` and set `SQLITE_DATABASE_FILE`
-   (a file name inside `data/`, default `auth.db`), `BETTER_AUTH_SECRET` (at least 32 random
-   characters), `BETTER_AUTH_URL`, `NEXT_PUBLIC_BETTER_AUTH_URL`, `ADMIN_EMAIL`
-   and `ADMIN_NAME`. Remove the old PostgreSQL `DATABASE_URL`; it is not used.
-   Set `RESTAURANT_TIME_ZONE` to the IANA time zone used by the restaurant; `UTC`
-   is only a development placeholder.
+1. Install Node.js 22.
+2. Create a PostgreSQL database (Neon is recommended for Vercel), then copy
+   `.env.example` to `.env.local` and set `DATABASE_URL`, `BETTER_AUTH_SECRET`
+   (at least 32 random characters), `BETTER_AUTH_URL`,
+   `NEXT_PUBLIC_BETTER_AUTH_URL`, `ADMIN_EMAIL` and `ADMIN_NAME`. Set
+   `RESTAURANT_TIME_ZONE` to the restaurant's IANA time zone; `UTC` is only a
+   development placeholder.
 3. Install dependencies with `npm install`.
-4. Create the local SQLite schema with `npm run db:migrate`.
+4. Create the PostgreSQL schema with `npm run db:migrate`.
 5. Create or reset the admin account using a strong password. In PowerShell:
 
    ```powershell
@@ -28,20 +28,19 @@ and placeholders rather than presenting invented details as fact.
 
    This creates the account if it does not exist, or resets its password and
    signs out existing sessions if it does. The database scripts load
-   `.env.local`; make sure it contains
-   `SQLITE_DATABASE_FILE` (if using a non-default file name), `ADMIN_EMAIL` and
+   `.env.local`; make sure it contains `DATABASE_URL`, `ADMIN_EMAIL` and
    `ADMIN_NAME`. The account email must match `ADMIN_EMAIL`.
 6. Start the app with `npm run dev`, then sign in at `/sign-in`. Add the
    restaurant's tables and opening hours in `/admin` before accepting requests.
 
-The migration script is idempotent. Back up the SQLite file before applying
-schema changes.
+The migration script is idempotent. Back up the database before applying schema
+changes.
 
 ## Environment variables
 
 | Variable | Purpose |
 | --- | --- |
-| `SQLITE_DATABASE_FILE` | SQLite database file name inside `data/` (default: `auth.db`) |
+| `DATABASE_URL` | PostgreSQL connection string for the persistent database |
 | `BETTER_AUTH_SECRET` | Session signing key and rate-limit key; use a unique secret in every environment |
 | `BETTER_AUTH_URL` | Canonical app URL for Better Auth |
 | `NEXT_PUBLIC_BETTER_AUTH_URL` | Public app URL used by the sign-in client |
@@ -55,20 +54,21 @@ schema changes.
 | `RESEND_FROM` | Verified sender address for contact messages |
 | `CONTACT_EMAIL` | Restaurant inbox that receives contact messages |
 
-Never commit `.env.local`, passwords, database credentials or API keys.
+Never commit `.env.local`, passwords, database credentials or API keys. For
+Vercel, add `DATABASE_URL` and the auth settings in Project Settings, then run
+`npm run db:migrate` against the production database before deploying.
 
 ## What's implemented
 
 - Yummibite public home, story, menu, gallery, contact and reservation pages.
-- SQLite schema and SQL migration for auth, hours, tables, reservations,
+- PostgreSQL schema and SQL migration for auth, hours, tables, reservations,
   menu and settings.
 - Guest reservation requests, server-side opening-hours and table availability,
-  multi-table allocation, SQLite transaction locking, booking references
+  multi-table allocation, PostgreSQL transaction locking, booking references
   and database-backed request rate limiting.
 - Better Auth email/password customer sign-up and sign-in; the navbar links to
   each signed-in customer's account name and email.
 - Google sign-in when `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set.
-- Customer email/password sign-up and sign-in; the navbar links to each signed-in customer's account name and email.
 - Admin routes remain restricted to the single `ADMIN_EMAIL` address.
 - Admin reservation status, opening-hours, table creation and menu category/item
   creation controls.
@@ -85,10 +85,8 @@ structured-data/sitemap/robots routes and automated application tests remain
 to be completed. Do not accept real bookings until those workflows and the
 restaurant's real details have been reviewed and tested.
 
-SQLite is intended for local/offline use and single-instance deployments. A
-multi-instance production deployment needs a shared database and a matching
-application adapter. Configure the authentication secret, email sender and
-restaurant time zone before deploying. The app does not ship with real
+Configure a persistent PostgreSQL database, authentication secret, email sender
+and restaurant time zone before deploying. The app does not ship with real
 restaurant hours, tables, menu items, prices or contact details.
 
 ## Checks

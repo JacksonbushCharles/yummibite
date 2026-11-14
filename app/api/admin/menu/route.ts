@@ -32,9 +32,10 @@ export async function POST(request: Request) {
     const database = getDatabase();
     if (parsedCategory.success) {
       const id = randomUUID();
-      database.prepare(
-        `INSERT INTO menu_categories (id, name, sort_order) VALUES (?, ?, ?)`,
-      ).run(id, parsedCategory.data.name, parsedCategory.data.sortOrder);
+      await database.query(
+        `INSERT INTO menu_categories (id, name, sort_order) VALUES ($1, $2, $3)`,
+        [id, parsedCategory.data.name, parsedCategory.data.sortOrder],
+      );
       return NextResponse.json({ id }, { status: 201 });
     }
     if (!parsedItem.success) {
@@ -42,17 +43,18 @@ export async function POST(request: Request) {
     }
 
     const id = randomUUID();
-    database.prepare(
+    await database.query(
       `INSERT INTO menu_items
          (id, category_id, name, description, price_minor, currency)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(
-      id,
-      parsedItem.data.categoryId,
-      parsedItem.data.name,
-      parsedItem.data.description,
-      parsedItem.data.priceMinor,
-      parsedItem.data.currency,
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        id,
+        parsedItem.data.categoryId,
+        parsedItem.data.name,
+        parsedItem.data.description,
+        parsedItem.data.priceMinor,
+        parsedItem.data.currency,
+      ],
     );
     return NextResponse.json({ id }, { status: 201 });
   } catch (error) {

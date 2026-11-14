@@ -26,7 +26,7 @@ async function checkRateLimit(request: Request) {
   if (!secret) throw new Error("BETTER_AUTH_SECRET must be set to rate-limit reservations.");
 
   const key = createHmac("sha256", secret).update(address).digest("hex");
-  return incrementRateLimit(key) <= 8;
+  return (await incrementRateLimit(key)) <= 8;
 }
 
 export async function POST(request: Request) {

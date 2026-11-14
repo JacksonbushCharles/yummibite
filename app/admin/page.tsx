@@ -30,39 +30,51 @@ type AdminReservation = {
 export default async function AdminPage() {
   const session = await requireAdmin();
   const database = getDatabase();
-  const reservations = database.prepare(
-    `SELECT id, reference, full_name, email, phone, starts_at, party_size, status
+  const [reservationResult, hoursResult, tablesResult, statsResult] = await Promise.all([
+    database.query<AdminReservation>(
+      `SELECT id, reference, full_name, email, phone, starts_at, party_size, status
      FROM reservations
-     WHERE julianday(starts_at) >= julianday('now', '-1 day')
-     ORDER BY starts_at ASC LIMIT 100`,
-  ).all() as AdminReservation[];
-  const hours = (database.prepare(
-    `SELECT day_of_week AS dayOfWeek, open_time AS openTime,
-            close_time AS closeTime, is_closed AS isClosed
-     FROM restaurant_hours ORDER BY day_of_week`,
-  ).all() as Array<{
-    dayOfWeek: number;
-    openTime: string | null;
-    closeTime: string | null;
-    isClosed: number;
-  }>).map((day) => ({ ...day, isClosed: Boolean(day.isClosed) }));
-  const tables = (database.prepare(
-    `SELECT name, capacity, section, is_active AS isActive
-     FROM restaurant_tables ORDER BY name`,
-  ).all() as Array<{
-    name: string;
-    capacity: number;
-    section: string | null;
-    isActive: number;
-  }>).map((table) => ({ ...table, isActive: Boolean(table.isActive) }));
-  const stats = database.prepare(
-    `SELECT
-       sum(CASE WHEN substr(starts_at, 1, 10) = date('now') THEN 1 ELSE 0 END) AS today,
-       sum(CASE WHEN julianday(starts_at) >= julianday('now') AND status = 'pending' THEN 1 ELSE 0 END) AS pending,
-       sum(CASE WHEN julianday(starts_at) >= julianday('now') AND status = 'confirmed' THEN 1 ELSE 0 END) AS confirmed
+       WHERE starts_at::timestamptz >= now() - interval '1 day'
+       ORDER BY starts_at ASC LIMIT 100`,
+    ),
+    database.query<{
+      dayOfWeek: number;
+      openTime: string | null;
+      closeTime: string | null;
+      isClosed: boolean;
+    }>(
+      `SELECT day_of_week AS "dayOfWeek", open_time AS "openTime",
+              close_time AS "closeTime", is_closed AS "isClosed"
+       FROM restaurant_hours ORDER BY day_of_week`,
+    ),
+    database.query<{
+      name: string;
+      capacity: number;
+      section: string | null;
+      isActive: boolean;
+    }>(
+      `SELECT name, capacity, section, is_active AS "isActive"
+       FROM restaurant_tables ORDER BY name`,
+    ),
+    database.query<{ today: number; pending: number; confirmed: number }>(
+      `SELECT
+         count(*) FILTER (
+           WHERE starts_at::timestamptz::date = CURRENT_DATE
+         )::int AS today,
+         count(*) FILTER (
+           WHERE starts_at::timestamptz >= now() AND status = 'pending'
+         )::int AS pending,
+         count(*) FILTER (
+           WHERE starts_at::timestamptz >= now() AND status = 'confirmed'
+         )::int AS confirmed
      FROM reservations
-     WHERE julianday(starts_at) >= julianday('now', '-1 day')`,
-  ).get() as { today: number | null; pending: number | null; confirmed: number | null };
+       WHERE starts_at::timestamptz >= now() - interval '1 day'`,
+    ),
+  ]);
+  const reservations = reservationResult.rows;
+  const hours = hoursResult.rows;
+  const tables = tablesResult.rows;
+  const stats = statsResult.rows[0];
   const categories = await getDb().select({ id: menuCategories.id, name: menuCategories.name })
     .from(menuCategories)
     .orderBy(desc(menuCategories.sortOrder));

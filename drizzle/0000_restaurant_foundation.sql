@@ -2,18 +2,18 @@ CREATE TABLE IF NOT EXISTS "user" (
   "id" text PRIMARY KEY NOT NULL,
   "name" text NOT NULL,
   "email" text NOT NULL UNIQUE,
-  "emailVerified" integer NOT NULL DEFAULT 0,
+  "emailVerified" boolean NOT NULL DEFAULT false,
   "image" text,
-  "createdAt" integer NOT NULL DEFAULT (unixepoch() * 1000),
-  "updatedAt" integer NOT NULL DEFAULT (unixepoch() * 1000)
+  "createdAt" timestamptz NOT NULL DEFAULT now(),
+  "updatedAt" timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS "session" (
   "id" text PRIMARY KEY NOT NULL,
-  "expiresAt" integer NOT NULL,
+  "expiresAt" timestamptz NOT NULL,
   "token" text NOT NULL UNIQUE,
-  "createdAt" integer NOT NULL DEFAULT (unixepoch() * 1000),
-  "updatedAt" integer NOT NULL DEFAULT (unixepoch() * 1000),
+  "createdAt" timestamptz NOT NULL DEFAULT now(),
+  "updatedAt" timestamptz NOT NULL DEFAULT now(),
   "ipAddress" text,
   "userAgent" text,
   "userId" text NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE
@@ -28,12 +28,12 @@ CREATE TABLE IF NOT EXISTS "account" (
   "accessToken" text,
   "refreshToken" text,
   "idToken" text,
-  "accessTokenExpiresAt" integer,
-  "refreshTokenExpiresAt" integer,
+  "accessTokenExpiresAt" timestamptz,
+  "refreshTokenExpiresAt" timestamptz,
   "scope" text,
   "password" text,
-  "createdAt" integer NOT NULL DEFAULT (unixepoch() * 1000),
-  "updatedAt" integer NOT NULL DEFAULT (unixepoch() * 1000)
+  "createdAt" timestamptz NOT NULL DEFAULT now(),
+  "updatedAt" timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS "account_userId_idx" ON "account" ("userId");
 
@@ -41,9 +41,9 @@ CREATE TABLE IF NOT EXISTS "verification" (
   "id" text PRIMARY KEY NOT NULL,
   "identifier" text NOT NULL,
   "value" text NOT NULL,
-  "expiresAt" integer NOT NULL,
-  "createdAt" integer DEFAULT (unixepoch() * 1000),
-  "updatedAt" integer DEFAULT (unixepoch() * 1000)
+  "expiresAt" timestamptz NOT NULL,
+  "createdAt" timestamptz DEFAULT now(),
+  "updatedAt" timestamptz DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS "verification_identifier_idx" ON "verification" ("identifier");
 
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS "restaurant_hours" (
   "day_of_week" integer PRIMARY KEY CHECK ("day_of_week" BETWEEN 0 AND 6),
   "open_time" text,
   "close_time" text,
-  "is_closed" integer NOT NULL DEFAULT 1,
+  "is_closed" boolean NOT NULL DEFAULT true,
   CHECK ("is_closed" OR ("open_time" IS NOT NULL AND "close_time" IS NOT NULL))
 );
 
@@ -60,8 +60,8 @@ CREATE TABLE IF NOT EXISTS "restaurant_tables" (
   "name" text NOT NULL UNIQUE,
   "capacity" integer NOT NULL CHECK ("capacity" > 0),
   "section" text,
-  "is_active" integer NOT NULL DEFAULT 1,
-  "created_at" text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  "is_active" boolean NOT NULL DEFAULT true,
+  "created_at" text NOT NULL DEFAULT now()::text
 );
 
 CREATE TABLE IF NOT EXISTS "reservations" (
@@ -77,8 +77,8 @@ CREATE TABLE IF NOT EXISTS "reservations" (
   "occasion" text,
   "status" text NOT NULL DEFAULT 'pending'
     CHECK ("status" IN ('pending', 'confirmed', 'seated', 'completed', 'cancelled', 'no_show')),
-  "created_at" text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  "updated_at" text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  "created_at" text NOT NULL DEFAULT now()::text,
+  "updated_at" text NOT NULL DEFAULT now()::text
 );
 CREATE INDEX IF NOT EXISTS "reservations_starts_at_idx" ON "reservations" ("starts_at");
 CREATE INDEX IF NOT EXISTS "reservations_status_idx" ON "reservations" ("status");
@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS "menu_categories" (
   "id" text PRIMARY KEY NOT NULL,
   "name" text NOT NULL,
   "sort_order" integer NOT NULL DEFAULT 0,
-  "is_visible" integer NOT NULL DEFAULT 1
+  "is_visible" boolean NOT NULL DEFAULT true
 );
 
 CREATE TABLE IF NOT EXISTS "menu_items" (
@@ -104,14 +104,14 @@ CREATE TABLE IF NOT EXISTS "menu_items" (
   "price_minor" integer NOT NULL CHECK ("price_minor" >= 0),
   "currency" text NOT NULL DEFAULT 'USD',
   "image_url" text,
-  "is_available" integer NOT NULL DEFAULT 1,
+  "is_available" boolean NOT NULL DEFAULT true,
   "sort_order" integer NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS "restaurant_settings" (
   "key" text PRIMARY KEY,
   "value" text NOT NULL,
-  "updated_at" text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  "updated_at" text NOT NULL DEFAULT now()::text
 );
 
 CREATE TABLE IF NOT EXISTS "reservation_rate_limits" (

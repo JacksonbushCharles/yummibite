@@ -34,7 +34,7 @@ export async function POST(request: Request) {
       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
       "unknown";
     const key = `contact:${createHmac("sha256", BETTER_AUTH_SECRET).update(address).digest("hex")}`;
-    if (incrementRateLimit(key) > 5) {
+    if (await incrementRateLimit(key) > 5) {
       return NextResponse.json({ error: "Too many messages. Please try again later." }, { status: 429 });
     }
 

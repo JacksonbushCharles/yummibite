@@ -1,7 +1,7 @@
 # Yummibite Project Guide
 
 A beginner-friendly tour of this project, from the pages visitors see to the
-server code, authentication, and SQLite database.
+server code, authentication, and PostgreSQL database.
 
 > **Start here:** this file describes how the project is wired. The restaurant's
 > actual address, opening hours, menu, and photographs still need to be supplied
@@ -24,11 +24,12 @@ The main working features are:
 - Restaurant-admin access restricted by the `ADMIN_EMAIL` setting.
 - An admin dashboard for reservation status, opening hours, tables, and menu
   content.
-- A local SQLite database. PostgreSQL and pgAdmin are not used by this setup.
+- A persistent PostgreSQL database, such as Neon for Vercel deployments.
 
 ## 2. Run the project locally
 
-Open a terminal in the project folder:
+Create a PostgreSQL database and put its connection string in `DATABASE_URL`
+inside `.env.local`. Open a terminal in the project folder:
 
 ```powershell
 npm install
@@ -45,7 +46,7 @@ Useful commands from [package.json](./package.json):
 | `npm run dev` | Starts the local development server. |
 | `npm run build` | Creates and type-checks a production build. Stop `npm run dev` first because both commands use `.next`. |
 | `npm run start` | Serves a previously built production app. |
-| `npm run db:migrate` | Creates any missing SQLite tables. Safe to run again. |
+| `npm run db:migrate` | Creates any missing PostgreSQL tables. Safe to run again. |
 | `npm run db:provision-admin` | Creates or resets the account whose email is `ADMIN_EMAIL`. It reads its password from the temporary `ADMIN_PASSWORD` environment variable. |
 | `npm run lint` | Runs ESLint; it needs a working ESLint configuration in the repository. |
 
@@ -55,8 +56,8 @@ Useful commands from [package.json](./package.json):
   before using the app.
 - `.env.local` is your private local configuration. It is intentionally ignored
   by Git; do not paste it into chats or commit it.
-- The database defaults to `data/auth.db`. `SQLITE_DATABASE_FILE` can select
-  another **file name inside `data/`**.
+- `DATABASE_URL` is the connection string for the persistent PostgreSQL database.
+  The migration and admin scripts load it from `.env.local`.
 - `BETTER_AUTH_SECRET` is a private signing key for authentication sessions
   and rate limits. It is **not** your account password. Generate a long random
   value and keep it private.
@@ -86,11 +87,11 @@ For a reservation, the flow is:
 4. The [availability route](./app/api/reservations/availability/route.ts)
    validates the date and party size, then calls the reservation service.
 5. [lib/reservations.ts](./lib/reservations.ts) checks opening hours, active
-   tables, existing bookings, and time-zone rules using SQLite.
+   tables, existing bookings, and time-zone rules using PostgreSQL.
 6. When the visitor submits, the form sends `POST /api/reservations`.
 7. The [reservation route](./app/api/reservations/route.ts) validates the
    details, checks the request rate limit, and asks the service to reserve
-   available tables in a SQLite transaction.
+   available tables in a PostgreSQL transaction.
 8. The browser displays a booking reference. The request remains **pending**;
    it is not automatically a confirmed reservation.
 
@@ -121,7 +122,7 @@ result. Never rely only on browser validation or hide server errors.
 | --- | --- | --- |
 | `/` | [Home page](./app/page.tsx) | Introduces the restaurant and links to the menu and booking form. Photos are explicitly samples. |
 | `/about` | [About page](./app/about/page.tsx) | Story and restaurant approach; real details await confirmation. |
-| `/menu` | [Menu page](./app/menu/page.tsx) | Reads visible categories and available items from SQLite using Drizzle. |
+| `/menu` | [Menu page](./app/menu/page.tsx) | Reads visible categories and available items from PostgreSQL using Drizzle. |
 | `/gallery` | [Gallery page](./app/gallery/page.tsx) | Gallery layout awaiting the restaurant's real photography. |
 | `/contact` | [Contact page](./app/contact/page.tsx) | Shows configured contact placeholders and embeds the contact form. |
 | `/reservations` | [Reservations page](./app/reservations/page.tsx) | Explains and embeds the reservation form. |
@@ -169,7 +170,7 @@ browser has similar checks.
 - [Better Auth route](./app/api/auth/%5B...all%5D/route.ts) forwards auth
   requests to Better Auth. This catch-all URL handles email/password signup,
   login, sessions, Google OAuth, and the OAuth callback.
-- [Server auth configuration](./lib/auth.ts) connects Better Auth to SQLite,
+- [Server auth configuration](./lib/auth.ts) connects Better Auth to PostgreSQL,
   sets the session secret and base URL, enables email/password accounts, and
   configures Google when both credentials exist.
 - [Browser auth client](./lib/auth-client.ts) is the client-side Better Auth
@@ -204,13 +205,13 @@ Each admin API checks `getAdminSession()` before changing data:
 
 ## 6. Services, database, and data model
 
-- [Database connection and helpers](./lib/db/index.ts) opens one shared
-  `better-sqlite3` connection, enables SQLite foreign keys, exposes Drizzle,
+- [Database connection and helpers](./lib/db/index.ts) opens a shared PostgreSQL
+  connection pool, exposes Drizzle,
   and increments/cleans request rate-limit records.
 - [Drizzle schema](./lib/db/schema.ts) describes application tables and types
   for TypeScript queries.
 - [SQL migration](./drizzle/0000_restaurant_foundation.sql) creates the
-  application and Better Auth tables in SQLite.
+  application and Better Auth tables in PostgreSQL.
 - [Migration script](./scripts/migrate.mjs) loads local environment settings
   and executes the SQL migration.
 - [Admin provisioning script](./scripts/provision-admin.mjs) securely hashes
@@ -223,7 +224,7 @@ Each admin API checks `getAdminSession()` before changing data:
 - [Utility functions](./lib/utils.ts) contains small shared helpers used in
   styling or formatting.
 
-The main SQLite tables are:
+The main PostgreSQL tables are:
 
 | Table | What it stores |
 | --- | --- |
@@ -236,8 +237,8 @@ The main SQLite tables are:
 | `restaurant_settings` | Extensible JSON settings. |
 | `reservation_rate_limits` | Hashed request keys, time windows, and attempt counts. |
 
-`data/auth.db` is a local binary data file, not source code. It should remain
-private, be backed up before risky changes, and never be committed or shared.
+Back up the PostgreSQL database before risky schema changes and keep its
+connection string private.
 
 ## 7. Concepts worth learning
 
@@ -281,7 +282,7 @@ private, be backed up before risky changes, and never be committed or shared.
 3. Follow those requests into the
    [availability route](./app/api/reservations/availability/route.ts) and
    [reservation service](./lib/reservations.ts).
-4. Read [SQLite connection](./lib/db/index.ts),
+4. Read [PostgreSQL connection](./lib/db/index.ts),
    [schema](./lib/db/schema.ts), and
    [migration SQL](./drizzle/0000_restaurant_foundation.sql) to understand
    persistence.
@@ -304,8 +305,8 @@ private, be backed up before risky changes, and never be committed or shared.
 - The project does not yet include reservation email confirmations/reminders,
   customer booking lookup/cancellation, full menu editing, deposits, refunds,
   audit logs, or automated application test suites.
-- SQLite is suitable for local and single-instance use. Multiple app instances
-  need a shared database and a matching database adapter.
+- PostgreSQL is shared and persistent across Vercel function instances. Run the
+  schema migration against the same database configured by `DATABASE_URL`.
 - The repository's `npm run lint` command needs an ESLint config; if it reports
   that no `eslint.config.*` exists, that is a project setup issue rather than a
   TypeScript compiler error.
